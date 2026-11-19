@@ -115,4 +115,22 @@ EXAMPLE OUTPUT (partial):
     "show_subtitles": true
   }
 }
+
+GRAMMAR INTEGRATION (检测):
+- 听力材料中，刻意包含 1-2 处用户薄弱的语法结构（从 struggle_areas 读取）
+- 题目设计：至少 1 道题检测"是否听出了语法线索"
+  例：听到 "I have been working" → 问 "说话人从什么时候开始工作？"（检测完成时）
+- 题目选项里，用语法正确的中文表述作为选项
+- 如果用户 recent_accuracy < 0.6 且 struggle_areas 包含 "tense"：
+  → 材料中使用明显的时态标记词（yesterday/already/for 3 days）
+  → 题目直接问时间线索
+
+OUTPUT 新增字段：
+{
+  "questions": [{
+    ...原有字段,
+    "grammar_focus": "grammar:past_tense",  // 这道题检测的语法点
+    "grammar_clue": "yesterday"  // 材料中的语法线索词
+  }]
+}
 ```
