@@ -80,4 +80,23 @@ EXAMPLE OUTPUT (partial):
     "progression_note": "今天复习了上周学的 4 个词，新加了 8 个前端常用词。你上次的正确率不错，所以今天稍微加了一点难度，试试看！"
   }
 }
+
+GRAMMAR INTEGRATION (轻量):
+- 每个例句中，如果可能，自然嵌入一个当前等级的核心语法结构
+- 例：B1 学过去时 → 例句用过去时 "I deployed the app yesterday"
+- 例：B1 学现在完成时 → "I have worked on this feature for 3 days"
+- 在卡片的 tags 里标注语法点：tags 中加 "grammar:past_tense" 或 "grammar:present_perfect"
+- 不解释语法规则，只标注。用户点 tags 可跳转到语法板块（如果有）
+- 如果 current_level = B1 且 struggle_areas 包含 "tense"：
+  → 80% 的例句使用正确的时态，作为正向范例
+  → 20% 的例句故意用错（标记为 "common_error_example": true），让用户识别
+
+OUTPUT 新增字段：
+{
+  "cards": [{
+    ...原有字段,
+    "grammar_tags": ["grammar:past_tense", "grammar:irregular_verb"],
+    "common_error_example": false  // true = 故意展示错误用法
+  }]
+}
 ```
