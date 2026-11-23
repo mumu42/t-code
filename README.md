@@ -179,6 +179,7 @@ review 结果 → user_grammar_profile 聚合薄弱点
 | **TTS 收敛为 flutter_tts** | f2 的五端 Adapter 矩阵在 Flutter 下收敛为一个 `flutter_tts` 依赖（iOS/Android/Web 三端原生覆盖）；桌面端 V2 再评估 |
 | **激励层不做成就系统** | 按 f3：XP + 12 级能力等级，无徽章 / 排行榜 / 虚拟货币 |
 | **AI 调度仅做文案** | prompt.md 第六节「AI 当 SRS 调度器」视为废弃，调度一律本地算法（离线原则）；其 insight 文案生成思路可保留 |
+| **AI 直连替代 Node 代理** | 原选型「Node.js + Express 仅做 AI 代理」调整为：App 内置 Agent 配置（设置页），OpenAI 兼容格式直连。配置项：baseURL / API Key / 模型（可拉取列表）/ 超时 / HTTP 代理。缓存本地（`agent_config` 表，明文——纯本地单用户应用），`AgentApiClient` 为后续各板块 AI 调用的统一入口 |
 
 **技术映射表（文档 → Flutter 实现）**：
 
@@ -198,12 +199,12 @@ review 结果 → user_grammar_profile 聚合薄弱点
 - [x] XP / Streak / 每日任务服务
 - [x] 统一保存管线 executeSavePipeline
 - [x] 首页 Dashboard（板块入口 + XPBar + 任务 + 复习角标）
+- [x] 设置页 · Agent 配置（baseURL / Key / 模型拉取 / 超时 / 代理 / 连接测试，本地缓存）
 - [ ] 定级模块（f1：自适应 10 题 + 90 题种子库）
 - [ ] 词汇板块（闪卡 + FSRS 排程 + TTS 发音）
-- [ ] 写作板块（输入 → AI 纠错 → diff）
+- [ ] 写作板块（输入 → AI 纠错 → diff，走 AgentApiClient）
 - [ ] 复习页（4 档 rating + 间隔预览，UI 层）
-- [ ] 设置页（词书管理 / 每日目标 / 数据导出）
-- [ ] AI 代理后端（Node.js，纠错 + 内容生成）
+- [ ] 设置页 · 其余项（词书管理 / 每日目标 / 数据导出）
 
 ## 八、贡献规约（给 AI 编程助手 & 人类）
 

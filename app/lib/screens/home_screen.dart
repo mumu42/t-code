@@ -11,6 +11,7 @@ import '../constants/levels.dart';
 import '../data/storage_service.dart';
 import '../services/srs_service.dart';
 import '../services/xp_service.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -23,8 +24,11 @@ class HomeScreen extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),
-            tooltip: '设置（开发中）',
-            onPressed: () => _todo(context, '设置页'),
+            tooltip: '设置',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
           ),
         ],
       ),
@@ -55,12 +59,6 @@ class HomeScreen extends StatelessWidget {
                 );
               },
             ),
-    );
-  }
-
-  void _todo(BuildContext context, String what) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$what · 待开发（V1 里程碑内）')),
     );
   }
 }

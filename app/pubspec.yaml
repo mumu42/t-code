@@ -45,6 +45,7 @@ dependencies:
   # TTS 发音（对应 f2.md 跨端 TTS 方案）
   flutter_tts: ^4.2.0
   sqflite_common_ffi: ^2.4.7
+  http: ^1.6.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

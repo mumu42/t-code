@@ -327,6 +327,21 @@ const List<String> kSchemaStatements = [
   )
   ''',
 
+  // ═══════════ Agent（AI 服务）配置 ═══════════
+  // 单行表（id 恒为 1）。OpenAI 兼容格式：base_url + api_key + model。
+  // 本地明文存储（纯本地单用户应用，见 README「关键设计决策」）。
+  '''
+  CREATE TABLE IF NOT EXISTS agent_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    base_url TEXT NOT NULL DEFAULT '',
+    api_key TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    timeout_sec INTEGER NOT NULL DEFAULT 60,
+    proxy TEXT,
+    updated_at DATETIME
+  )
+  ''',
+
   // ═══════════ 口语录音元数据（f2 §八）═══════════
   '''
   CREATE TABLE IF NOT EXISTS speaking_recordings (
