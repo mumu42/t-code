@@ -126,10 +126,13 @@ lib/
 │   ├── xp_rules.dart               XP 来源枚举 + 等级阈值 + 每日上限（f3 §二）
 │   └── prompt_defaults.dart        16 个 Prompt 变量兜底值
 ├── data/
-│   ├── schema.dart                 统一建表 DDL（v1，汇总 f1/f3/f4/f5）
+│   ├── schema.dart                 统一建表 DDL（v4，汇总 f1/f3/f4/f5 + 种子表族）
 │   └── storage_service.dart        SQLite 唯一入口（事务/查询/写入）
 ├── models/
-│   └── srs_card.dart               Rating / CardState / SRSCard
+│   ├── srs_card.dart               Rating / CardState / SRSCard
+│   ├── vocabulary.dart             SeedWord / VocabCard / VocabEntry（两表同构）
+│   ├── seed_sentence.dart          SeedSentence（听力/阅读/口语共用句库）
+│   └── seed_content.dart           阅读篇章/口语场景/写作搭配/写作题目
 ├── services/                       服务层（单例，业务与 UI 的唯一桥梁）
 │   ├── srs_service.dart            简化 FSRS：calculateNextReview 等（f4）
 │   ├── xp_service.dart             awardXP / 等级计算（f3 §四）
@@ -139,7 +142,9 @@ lib/
 │   ├── prompt_assembler.dart       Prompt 组装 + 残留占位符检查
 │   └── tts/tts_service.dart        统一 TTS 入口（f2 的 Flutter 适配）
 └── screens/
-    └── home_screen.dart            首页 Dashboard（板块入口/XPBar/任务/角标）
+    ├── home_screen.dart            首页 Dashboard（板块入口/XPBar/任务/角标）
+    ├── settings_screen.dart        设置页（分板块：Agent 入口/学习/发音/数据/关于）
+    └── agent_config_screen.dart    Agent 配置页（独立页面，从设置页进入）
 ```
 
 后续板块代码放 `lib/boards/<board>/`（vocab / listening / reading / speaking /
@@ -180,6 +185,8 @@ review 结果 → user_grammar_profile 聚合薄弱点
 | **激励层不做成就系统** | 按 f3：XP + 12 级能力等级，无徽章 / 排行榜 / 虚拟货币 |
 | **AI 调度仅做文案** | prompt.md 第六节「AI 当 SRS 调度器」视为废弃，调度一律本地算法（离线原则）；其 insight 文案生成思路可保留 |
 | **AI 直连替代 Node 代理** | 原选型「Node.js + Express 仅做 AI 代理」调整为：App 内置 Agent 配置（设置页），OpenAI 兼容格式直连。配置项：baseURL / API Key / 模型（可拉取列表）/ 超时 / HTTP 代理。缓存本地（`agent_config` 表，明文——纯本地单用户应用），`AgentApiClient` 为后续各板块 AI 调用的统一入口 |
+| **词汇内容双表** | `seed_words`（内置词库，随版本发布、只读、无 user_id）+ `vocab_cards`（用户/AI 词卡，运行时产生）。两表字段同构（对齐 prompt.md §一输出 schema），复习页按 item_id 前缀解析：`w_` → seed_words，`uv_` → vocab_cards。种子内容软下线用 `active` 标记不物理删除（防孤儿 srs_cards，f4 §九）。文档冲突裁决：f1 的 `vocab_cards` 定位为用户侧数据（按 modules-connect），种子表统一 `seed_*` 前缀命名（按 f4） |
+| **种子内容表族（八表）** | 词汇 `seed_words`、句子 `seed_sentences`（听力/阅读/口语三板块共用，f4 §6 入队指向同一张表）、阅读 `seed_reading_passages`、口语 `seed_speaking_scenarios`、写作 `seed_collocations` + `seed_writing_prompts`、用户词卡 `vocab_cards`、版本记录 `seed_meta`。统一规范：id 前缀跨版本稳定（`w_/s_/p_/sc_/col_/wp_/uv_`）、无 user_id、`active` 软下线、字段对齐 prompt.md 输出 schema；运行时 AI 生成的题目/标注不入库。定级题库（f1 的 90 题）不建表，运行时从 asset 内存加载 |
 
 **技术映射表（文档 → Flutter 实现）**：
 
@@ -199,12 +206,15 @@ review 结果 → user_grammar_profile 聚合薄弱点
 - [x] XP / Streak / 每日任务服务
 - [x] 统一保存管线 executeSavePipeline
 - [x] 首页 Dashboard（板块入口 + XPBar + 任务 + 复习角标）
-- [x] 设置页 · Agent 配置（baseURL / Key / 模型拉取 / 超时 / 代理 / 连接测试，本地缓存）
+- [x] 设置页（分板块：Agent 配置 / 学习偏好 / 发音偏好 / 数据管理 / 关于）
+- [x] 词汇内容表（seed_words + vocab_cards + seed_meta，schema v3，含迁移验证）
+- [x] 其余板块种子表（seed_sentences / seed_reading_passages / seed_speaking_scenarios / seed_collocations / seed_writing_prompts，schema v4，含迁移验证）
+- [ ] 种子数据：各板块内置内容 + SeedImporterService（assets/seed/*.json）
 - [ ] 定级模块（f1：自适应 10 题 + 90 题种子库）
 - [ ] 词汇板块（闪卡 + FSRS 排程 + TTS 发音）
 - [ ] 写作板块（输入 → AI 纠错 → diff，走 AgentApiClient）
 - [ ] 复习页（4 档 rating + 间隔预览，UI 层）
-- [ ] 设置页 · 其余项（词书管理 / 每日目标 / 数据导出）
+- [ ] 设置页 · 剩余项（词书管理 / 数据导出）
 
 ## 八、贡献规约（给 AI 编程助手 & 人类）
 

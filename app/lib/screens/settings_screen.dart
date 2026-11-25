@@ -1,15 +1,24 @@
-/// 设置页 — Agent（AI 服务）配置
+/// 设置页 — 分板块结构
 ///
-/// 对应 V1 页面 5「设置页」。Agent 配置一次缓存本地（agent_config 表），
-/// 下次打开自动回填，无需重配。字段：
-/// baseURL / API Key / 模型 / 请求超时 / HTTP 代理。
+/// 对应 V1 页面 5「设置页」。板块划分：
+/// ① Agent 配置（AI 服务）—— 入口条目，点击进入独立的 AgentConfigScreen
+/// ② 学习偏好 —— 每日新词目标（user_profile.daily_goal_vocab）
+/// ③ 发音偏好 —— 口音 / 自动播放（user_profile.tts_accent / tts_autoplay）
+/// ④ 数据管理 —— 导出 / 备份（待开发）
+/// ⑤ 关于
+///
+/// 简单项（②③）改动即存；Agent 配置在独立页面用显式保存。
 library;
 
 import 'package:flutter/material.dart';
 
+import '../constants/app_constants.dart';
+import '../data/storage_service.dart';
 import '../models/agent_config.dart';
-import '../services/agent/agent_api_client.dart';
 import '../services/agent/agent_config_service.dart';
+import '../services/tts/tts_service.dart';
+import '../services/xp_service.dart';
+import 'agent_config_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -19,29 +28,15 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final _formKey = GlobalKey<FormState>();
+  // ── Agent 配置摘要（详情在独立页面维护）──
+  AgentConfig? _agentConfig;
 
-  final _baseUrlCtrl = TextEditingController();
-  final _apiKeyCtrl = TextEditingController();
-  final _modelCtrl = TextEditingController();
-  final _timeoutCtrl = TextEditingController();
-  final _proxyCtrl = TextEditingController();
+  // ── 学习偏好 ──
+  int _dailyGoal = 10;
 
-  bool _obscureApiKey = true;
-  bool _loading = false;
-  bool _testing = false;
-  bool _fetchingModels = false;
-  TestResult? _testResult;
-  List<String> _fetchedModels = [];
-  DateTime? _savedAt;
-
-  AgentConfig get _currentConfig => AgentConfig(
-        baseUrl: _baseUrlCtrl.text.trim(),
-        apiKey: _apiKeyCtrl.text.trim(),
-        model: _modelCtrl.text.trim(),
-        timeoutSec: int.tryParse(_timeoutCtrl.text.trim()) ?? 60,
-        proxy: _proxyCtrl.text.trim().isEmpty ? null : _proxyCtrl.text.trim(),
-      );
+  // ── 发音偏好 ──
+  TtsAccent _accent = TtsAccent.us;
+  bool _autoplay = true;
 
   @override
   void initState() {
@@ -51,304 +46,202 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSaved() async {
     final config = await AgentConfigService.instance.load();
+    final profile = await XpService.instance.getProfile(kLocalUserId);
     if (!mounted) return;
     setState(() {
-      _baseUrlCtrl.text = config.baseUrl;
-      _apiKeyCtrl.text = config.apiKey;
-      _modelCtrl.text = config.model;
-      _timeoutCtrl.text = '${config.timeoutSec}';
-      _proxyCtrl.text = config.proxy ?? '';
-      _savedAt = config.updatedAt;
+      _agentConfig = config;
+      _dailyGoal = (profile?['daily_goal_vocab'] as int?) ?? 10;
+      final accentDb = (profile?['tts_accent'] as String?) ?? 'us';
+      _accent = switch (accentDb) {
+        'uk' => TtsAccent.uk,
+        'au' => TtsAccent.au,
+        _ => TtsAccent.us,
+      };
+      _autoplay = (profile?['tts_autoplay'] as int? ?? 1) == 1;
     });
   }
 
-  @override
-  void dispose() {
-    _baseUrlCtrl.dispose();
-    _apiKeyCtrl.dispose();
-    _modelCtrl.dispose();
-    _timeoutCtrl.dispose();
-    _proxyCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _loading = true);
-    try {
-      await AgentConfigService.instance.save(_currentConfig);
-      if (!mounted) return;
-      setState(() => _savedAt = DateTime.now());
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ 配置已保存，下次打开自动使用')),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('保存失败：$e')));
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _testConnection() async {
-    if (!_formKey.currentState!.validate()) return;
-    // 测试前先保存当前填写值，保证「测试通过 = 已落盘的配置可用」
-    await AgentConfigService.instance.save(_currentConfig);
-    setState(() {
-      _testing = true;
-      _testResult = null;
-    });
-    final result = await AgentApiClient(_currentConfig).testConnection();
-    if (!mounted) return;
-    setState(() {
-      _testing = false;
-      _testResult = result;
-      _savedAt = DateTime.now();
-    });
-  }
-
-  Future<void> _fetchModels() async {
-    final config = _currentConfig;
-    if (config.baseUrl.isEmpty || config.apiKey.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先填写 baseURL 和 API Key')),
-      );
-      return;
-    }
-    setState(() => _fetchingModels = true);
-    try {
-      final models = await AgentApiClient(config).fetchModels();
-      if (!mounted) return;
-      setState(() => _fetchedModels = models);
-      if (models.isEmpty) {
-        _toast('该服务未返回任何模型，请手动填写模型名');
-      } else {
-        await _showModelPicker(models);
-      }
-    } catch (e) {
-      if (mounted) {
-        _toast('拉取失败：$e\n（部分服务不支持 /models 接口，可手动填写）');
-      }
-    } finally {
-      if (mounted) setState(() => _fetchingModels = false);
-    }
-  }
-
-  Future<void> _showModelPicker(List<String> models) async {
-    final picked = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView.builder(
-          itemCount: models.length,
-          itemBuilder: (context, i) {
-            final id = models[i];
-            final isCurrent = id == _modelCtrl.text.trim();
-            return ListTile(
-              title: Text(id, style: const TextStyle(fontSize: 14)),
-              trailing: isCurrent
-                  ? const Icon(Icons.check_circle, color: Colors.green)
-                  : null,
-              onTap: () => Navigator.pop(context, id),
-            );
-          },
-        ),
-      ),
+  /// 简单项即时落库（user_profile，字段名为固定字面量，无注入风险）
+  Future<void> _updateProfile(String field, Object value) async {
+    await StorageService.instance.execute(
+      'UPDATE user_profile SET $field = ? WHERE user_id = ?',
+      [value, kLocalUserId],
     );
-    if (picked != null) {
-      setState(() => _modelCtrl.text = picked);
-    }
+  }
+
+  // ═══════════════════════ 简单项动作 ═══════════════════════
+
+  Future<void> _setDailyGoal(int value) async {
+    setState(() => _dailyGoal = value);
+    await _updateProfile('daily_goal_vocab', value);
+  }
+
+  Future<void> _setAccent(TtsAccent value) async {
+    setState(() => _accent = value);
+    await _updateProfile('tts_accent', value.name);
+    TTSService.instance.invalidateAccentCache(); // 下次朗读立即生效
+  }
+
+  Future<void> _setAutoplay(bool value) async {
+    setState(() => _autoplay = value);
+    await _updateProfile('tts_autoplay', value ? 1 : 0);
+  }
+
+  Future<void> _openAgentConfig() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AgentConfigScreen()),
+    );
+    // 返回后刷新摘要（可能已保存新配置）
+    await _loadSaved();
   }
 
   void _toast(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  // ═══════════════════════ UI ═══════════════════════
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _sectionTitle('🤖 Agent 配置'),
-            _sectionSubtitle(
-                'OpenAI 兼容格式。配置保存后缓存本地，各板块 AI 功能将使用此配置。'),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _baseUrlCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Base URL',
-                hintText: '如 https://api.deepseek.com/v1（完整地址，原样使用不补全）',
-                prefixIcon: Icon(Icons.link),
-                border: OutlineInputBorder(),
-              ),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? '必填' : null,
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _apiKeyCtrl,
-              obscureText: _obscureApiKey,
-              decoration: InputDecoration(
-                labelText: 'API Key（sk-key）',
-                hintText: 'sk-...',
-                prefixIcon: const Icon(Icons.key),
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: Icon(_obscureApiKey
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined),
-                  onPressed: () =>
-                      setState(() => _obscureApiKey = !_obscureApiKey),
-                ),
-              ),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? '必填' : null,
-            ),
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _modelCtrl,
-                    decoration: const InputDecoration(
-                      labelText: '模型（model）',
-                      hintText: '如 deepseek-chat',
-                      prefixIcon: Icon(Icons.smart_toy_outlined),
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? '必填' : null,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  height: 56,
-                  child: OutlinedButton.icon(
-                    onPressed: _fetchingModels ? null : _fetchModels,
-                    icon: _fetchingModels
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.refresh),
-                    label: const Text('拉取列表'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _timeoutCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '请求超时（秒）',
-                hintText: '默认 60',
-                prefixIcon: Icon(Icons.timer_outlined),
-                border: OutlineInputBorder(),
-              ),
-              validator: (v) {
-                final n = int.tryParse(v?.trim() ?? '');
-                if (n == null || n < 5 || n > 600) return '5-600 之间的整数';
-                return null;
-              },
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _proxyCtrl,
-              decoration: const InputDecoration(
-                labelText: 'HTTP 代理（可选）',
-                hintText: '如 127.0.0.1:7890，留空直连',
-                prefixIcon: Icon(Icons.vpn_lock_outlined),
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _loading ? null : _save,
-                    icon: _loading
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.save_outlined),
-                    label: const Text('保存'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _testing ? null : _testConnection,
-                    icon: _testing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.wifi_tethering),
-                    label: const Text('测试连接'),
-                  ),
-                ),
-              ],
-            ),
-            if (_testResult != null) ...[
-              const SizedBox(height: 16),
-              _testResultCard(_testResult!),
-            ],
-            if (_fetchedModels.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                '已拉取 ${_fetchedModels.length} 个模型，点击「拉取列表」重新选择',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-            if (_savedAt != null) ...[
-              const SizedBox(height: 24),
-              Center(
-                child: Text(
-                  '上次保存：${_savedAt!.toLocal().toString().substring(0, 19)}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-            ],
-            const SizedBox(height: 32),
-            _sectionTitle('📚 其他设置'),
-            _sectionSubtitle('词书管理 / 每日目标 / 数据导出 · 待开发（V1 里程碑内）'),
-          ],
-        ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _agentEntry(),
+          const SizedBox(height: 12),
+          _learningSection(),
+          const SizedBox(height: 12),
+          _speechSection(),
+          const SizedBox(height: 12),
+          _dataSection(),
+          const SizedBox(height: 12),
+          _aboutSection(),
+        ],
       ),
     );
   }
 
-  Widget _testResultCard(TestResult result) {
-    final ok = result.ok;
-    final warn = result.ok && result.modelExists == false;
-    final color = ok
-        ? (warn ? Colors.orange : Colors.green)
-        : Theme.of(context).colorScheme.error;
-    final icon = ok
-        ? (warn ? Icons.warning_amber_rounded : Icons.check_circle)
-        : Icons.error_outline;
+  // ── ① Agent 配置（入口条目）──
+
+  Widget _agentEntry() {
+    final config = _agentConfig;
+    final configured = config?.isConfigured ?? false;
     return Card(
-      color: color.withValues(alpha: 0.08),
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        leading: const Icon(Icons.smart_toy_outlined),
+        title: const Text('Agent 配置',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        subtitle: Text(
+          configured
+              ? '${config!.model} · ${_briefUrl(config.baseUrl)}'
+              : '未配置 · 各板块 AI 功能需要此配置',
+          style: TextStyle(
+            fontSize: 12,
+            color: configured ? Colors.grey : Colors.orange,
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: _openAgentConfig,
+      ),
+    );
+  }
+
+  String _briefUrl(String url) {
+    // 去协议前缀，过长截断，摘要更清爽
+    var u = url.replaceFirst(RegExp(r'^https?://'), '');
+    return u.length > 28 ? '${u.substring(0, 28)}…' : u;
+  }
+
+  // ── ② 学习偏好 ──
+
+  Widget _learningSection() {
+    return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
+        padding: const EdgeInsets.all(16),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(result.message,
-                  style: TextStyle(color: color, fontSize: 13)),
+            const Row(
+              children: [
+                Icon(Icons.school_outlined),
+                SizedBox(width: 12),
+                Text('学习偏好',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Expanded(child: Text('每日新词目标')),
+                IconButton(
+                  icon: const Icon(Icons.remove_circle_outline),
+                  onPressed:
+                      _dailyGoal > 5 ? () => _setDailyGoal(_dailyGoal - 5) : null,
+                ),
+                Text('$_dailyGoal',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
+                IconButton(
+                  icon: const Icon(Icons.add_circle_outline),
+                  onPressed: _dailyGoal < 100
+                      ? () => _setDailyGoal(_dailyGoal + 5)
+                      : null,
+                ),
+              ],
+            ),
+            const Text('词汇板块每次练习的新词数量上限（改动即时生效）',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── ③ 发音偏好 ──
+
+  Widget _speechSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.record_voice_over_outlined),
+                SizedBox(width: 12),
+                Text('发音偏好',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Expanded(child: Text('口音')),
+                SegmentedButton<TtsAccent>(
+                  segments: const [
+                    ButtonSegment(value: TtsAccent.us, label: Text('美音')),
+                    ButtonSegment(value: TtsAccent.uk, label: Text('英音')),
+                    ButtonSegment(value: TtsAccent.au, label: Text('澳音')),
+                  ],
+                  selected: {_accent},
+                  onSelectionChanged: (s) => _setAccent(s.first),
+                  showSelectedIcon: false,
+                ),
+              ],
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('自动播放发音'),
+              subtitle: const Text('练习中遇到单词/例句时自动朗读',
+                  style: TextStyle(fontSize: 12)),
+              value: _autoplay,
+              onChanged: _setAutoplay,
             ),
           ],
         ),
@@ -356,16 +249,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _sectionTitle(String text) => Text(
-        text,
-        style: Theme.of(context)
-            .textTheme
-            .titleMedium
-            ?.copyWith(fontWeight: FontWeight.bold),
-      );
+  // ── ④ 数据管理 ──
 
-  Widget _sectionSubtitle(String text) => Text(
-        text,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
-      );
+  Widget _dataSection() {
+    return Card(
+      child: Column(
+        children: [
+          const ListTile(
+            leading: Icon(Icons.folder_zip_outlined),
+            title: Text('数据管理',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.file_upload_outlined),
+            title: const Text('导出学习数据'),
+            subtitle: const Text('SRS 卡片 / XP 流水 / 错题记录',
+                style: TextStyle(fontSize: 12)),
+            trailing: const Chip(
+                label: Text('待开发', style: TextStyle(fontSize: 10))),
+            onTap: () => _toast('数据导出 · 待开发（V1 里程碑内）'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.storage),
+            title: const Text('数据库位置'),
+            subtitle: const Text('本地 SQLite，随配置缓存',
+                style: TextStyle(fontSize: 12)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _toast('备份：直接拷贝 linguaflow.db 文件'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── ⑤ 关于 ──
+
+  Widget _aboutSection() {
+    return Card(
+      child: const ListTile(
+        leading: Icon(Icons.info_outline),
+        title: Text('关于 LinguaFlow'),
+        subtitle: Text('V1 MVP · Flutter + SQLite · 离线优先',
+            style: TextStyle(fontSize: 12)),
+      ),
+    );
+  }
 }

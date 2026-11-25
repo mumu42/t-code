@@ -14,6 +14,9 @@ library;
 import 'package:flutter/foundation.dart' show kIsWeb, VoidCallback;
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../../constants/app_constants.dart';
+import '../../data/storage_service.dart';
+
 /// 口音偏好
 enum TtsAccent { us, uk, au }
 
@@ -29,7 +32,7 @@ class TtsOptions {
 
   final double? rate; // null = 按 CEFR 等级自动（getTTSRate）
   final double pitch;
-  final TtsAccent accent;
+  final TtsAccent? accent; // null = 读用户设置（user_profile.tts_accent）
   final VoidCallback? onDone;
   final void Function(String error)? onError;
 }
@@ -58,8 +61,33 @@ class TTSService {
   final FlutterTts _tts = FlutterTts();
   bool _engineReady = false;
   bool _speaking = false;
+  TtsAccent? _cachedProfileAccent; // 设置页口音缓存
 
   bool get isSpeaking => _speaking;
+
+  /// 设置页修改口音后调用，下次朗读立即生效
+  void invalidateAccentCache() => _cachedProfileAccent = null;
+
+  /// 读取用户设置的口音（user_profile.tts_accent，'B1' 类兜底：默认美音）
+  Future<TtsAccent> _loadAccent() async {
+    if (_cachedProfileAccent != null) return _cachedProfileAccent!;
+    if (!StorageService.instance.isReady) return TtsAccent.us;
+    try {
+      final rows = await StorageService.instance.query(
+        'SELECT tts_accent FROM user_profile WHERE user_id = ?',
+        [kLocalUserId],
+      );
+      final v = (rows.first['tts_accent'] as String?) ?? 'us';
+      _cachedProfileAccent = switch (v) {
+        'uk' => TtsAccent.uk,
+        'au' => TtsAccent.au,
+        _ => TtsAccent.us,
+      };
+    } catch (_) {
+      _cachedProfileAccent = TtsAccent.us;
+    }
+    return _cachedProfileAccent!;
+  }
 
   Future<void> _initEngine() async {
     try {
@@ -91,9 +119,10 @@ class TTSService {
       // Web 端保守截断，避免个别浏览器 TTS 队列卡死
       text = text.substring(0, 4000);
     }
+    final accent = options.accent ?? await _loadAccent();
     try {
       if (!_engineReady) await _initEngine();
-      await _tts.setLanguage(await _resolveLang(options.accent));
+      await _tts.setLanguage(await _resolveLang(accent));
       await _tts.setPitch(options.pitch);
       // rate 未指定时按等级自动（默认 B1 = 0.9）
       await _tts

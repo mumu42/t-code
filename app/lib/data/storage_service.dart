@@ -48,19 +48,22 @@ class StorageService {
     final dir = await getApplicationDocumentsDirectory();
     _db = await openDatabase(
       p.join(dir.path, 'linguaflow.db'),
-      version: 2,
+      version: 4,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: _onCreate,
       onUpgrade: (db, oldVersion, newVersion) async {
         // 建表语句全部 IF NOT EXISTS，直接重放即可幂等迁移
         // v1 → v2：新增 agent_config 表
+        // v2 → v3：新增 seed_words / vocab_cards / seed_meta 表
+        // v3 → v4：新增 seed_sentences / seed_reading_passages /
+        //          seed_speaking_scenarios / seed_collocations / seed_writing_prompts
         for (final stmt in kSchemaStatements) {
           await db.execute(stmt);
         }
       },
     );
     // 兜底：异常退出导致的半迁移状态，重放幂等 DDL
-    await _onCreate(_db!, 2);
+    await _onCreate(_db!, 4);
   }
 
   Future<void> _onCreate(Database db, int version) async {

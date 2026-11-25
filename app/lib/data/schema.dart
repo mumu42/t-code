@@ -342,6 +342,162 @@ const List<String> kSchemaStatements = [
   )
   ''',
 
+  // ═══════════ 词汇内容表（v3 新增）═══════════
+  // 设计决策：词汇内容双表——seed_words 为随版本发布的内置词库（只读、
+  // 无 user_id），vocab_cards 为运行时产生的用户/AI 词卡。两表字段同构，
+  // 复习页按 id 前缀（w_ / uv_）决定解析去向。软下线用 active 标记，
+  // 不物理删除（防孤儿 srs_cards，f4 §九）。
+
+  // ── seed_words：内置词库（自研技术词库，LinguaFlow.md §三.1）──
+  '''
+  CREATE TABLE IF NOT EXISTS seed_words (
+    id TEXT PRIMARY KEY,
+    word TEXT NOT NULL UNIQUE,
+    phonetics TEXT,
+    part_of_speech TEXT,
+    meaning_cn TEXT NOT NULL,
+    example TEXT,
+    example_cn TEXT,
+    cefr TEXT NOT NULL,
+    difficulty INTEGER NOT NULL DEFAULT 3,
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    grammar_tags_json TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL
+  )
+  ''',
+  'CREATE INDEX IF NOT EXISTS idx_seed_words_cefr ON seed_words(cefr, difficulty)',
+  'CREATE INDEX IF NOT EXISTS idx_seed_words_active ON seed_words(active)',
+
+  // ── vocab_cards：用户/AI 词卡（modules-connect 词汇板块产出）──
+  '''
+  CREATE TABLE IF NOT EXISTS vocab_cards (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    word TEXT NOT NULL,
+    phonetics TEXT,
+    part_of_speech TEXT,
+    meaning_cn TEXT NOT NULL,
+    example TEXT,
+    example_cn TEXT,
+    cefr TEXT NOT NULL,
+    difficulty INTEGER NOT NULL DEFAULT 3,
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    grammar_tags_json TEXT,
+    source TEXT NOT NULL DEFAULT 'ai',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE(user_id, word),
+    FOREIGN KEY (user_id) REFERENCES user_profile(user_id)
+  )
+  ''',
+  'CREATE INDEX IF NOT EXISTS idx_vocab_cards_user ON vocab_cards(user_id, cefr)',
+
+  // ── seed_meta：种子导入版本记录 ──
+  '''
+  CREATE TABLE IF NOT EXISTS seed_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )
+  ''',
+
+  // ═══════════ 其余板块种子内容表（v4 新增）═══════════
+  // 与 seed_words 同族规范：只读静态内容、无 user_id、id 前缀跨版本稳定、
+  // active 软下线不物理删除。字段对齐 prompt.md 各板块输出 schema，
+  // 运行时 AI 生成的题目/标注不入库。
+
+  // ── seed_sentences：听力精听句 + 阅读硬句 + 口语跟读句（三板块共用）──
+  '''
+  CREATE TABLE IF NOT EXISTS seed_sentences (
+    id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    translation_cn TEXT,
+    cefr TEXT NOT NULL,
+    difficulty INTEGER NOT NULL DEFAULT 3,
+    word_count INTEGER,
+    source_type TEXT NOT NULL,
+    source_ref TEXT,
+    keywords_json TEXT,
+    grammar_tags_json TEXT,
+    audio_hint_json TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL
+  )
+  ''',
+  'CREATE INDEX IF NOT EXISTS idx_seed_sentences_cefr ON seed_sentences(cefr, source_type)',
+  'CREATE INDEX IF NOT EXISTS idx_seed_sentences_active ON seed_sentences(active)',
+
+  // ── seed_reading_passages：阅读分级短文 ──
+  '''
+  CREATE TABLE IF NOT EXISTS seed_reading_passages (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    passage TEXT NOT NULL,
+    cefr TEXT NOT NULL,
+    difficulty INTEGER NOT NULL DEFAULT 3,
+    word_count INTEGER,
+    topic_tags_json TEXT,
+    grammar_tags_json TEXT,
+    source TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL
+  )
+  ''',
+  'CREATE INDEX IF NOT EXISTS idx_seed_passages_cefr ON seed_reading_passages(cefr, difficulty)',
+
+  // ── seed_speaking_scenarios：口语场景骨架（对话细节由 AI 按 prompt.md §三展开）──
+  '''
+  CREATE TABLE IF NOT EXISTS seed_speaking_scenarios (
+    id TEXT PRIMARY KEY,
+    scenario_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description_cn TEXT,
+    user_role_cn TEXT,
+    ai_role_cn TEXT,
+    cefr TEXT NOT NULL,
+    difficulty INTEGER NOT NULL DEFAULT 3,
+    keywords_json TEXT,
+    grammar_tags_json TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL
+  )
+  ''',
+  'CREATE INDEX IF NOT EXISTS idx_seed_scenarios_cefr ON seed_speaking_scenarios(cefr, scenario_type)',
+
+  // ── seed_collocations：写作动词搭配 ──
+  '''
+  CREATE TABLE IF NOT EXISTS seed_collocations (
+    id TEXT PRIMARY KEY,
+    phrase TEXT NOT NULL UNIQUE,
+    meaning_cn TEXT NOT NULL,
+    example TEXT,
+    example_cn TEXT,
+    cefr TEXT NOT NULL,
+    difficulty INTEGER NOT NULL DEFAULT 3,
+    tags_json TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL
+  )
+  ''',
+  'CREATE INDEX IF NOT EXISTS idx_seed_collocations_cefr ON seed_collocations(cefr, difficulty)',
+
+  // ── seed_writing_prompts：写作题目（「描述你今天修的 bug」类技术职场题）──
+  '''
+  CREATE TABLE IF NOT EXISTS seed_writing_prompts (
+    id TEXT PRIMARY KEY,
+    prompt_cn TEXT NOT NULL,
+    keywords_json TEXT,
+    theme TEXT,
+    cefr TEXT NOT NULL,
+    difficulty INTEGER NOT NULL DEFAULT 3,
+    tags_json TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL
+  )
+  ''',
+  'CREATE INDEX IF NOT EXISTS idx_seed_writing_prompts_cefr ON seed_writing_prompts(cefr, difficulty)',
+
   // ═══════════ 口语录音元数据（f2 §八）═══════════
   '''
   CREATE TABLE IF NOT EXISTS speaking_recordings (
